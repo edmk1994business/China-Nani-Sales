@@ -12,7 +12,9 @@ from __future__ import annotations
 import io
 import re
 from dataclasses import dataclass
+from typing import Sequence
 
+import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
@@ -20,6 +22,7 @@ import streamlit as st
 from . import config
 
 NUMERIC = ["sales_gross", "sales_net", "checks", "cogs"]
+DIMENSIONS = ["brand", "channel", "payment_type", "payment_label"]
 
 
 @dataclass
@@ -164,3 +167,64 @@ def load_sales() -> LoadResult:
 
 def clear_cache() -> None:
     _download.clear()
+
+
+# --------------------------------------------------------------------------- #
+# Aggregation (Daily / Weekly / Monthly)
+# --------------------------------------------------------------------------- #
+def assign_buckets(df: pd.DataFrame, buckets: Sequence) -> pd.DataFrame:
+    """Tag every record with the bucket (day / calendar week / calendar month) it falls in.
+
+    `buckets` are periods.Bucket objects (start, end, label), sorted and non-overlapping.
+    Rows outside every bucket are dropped. Adds: bucket_idx, period, period_start.
+    """
+    cols = list(df.columns) + ["bucket_idx", "period", "period_start"]
+    if df.empty or not buckets:
+        return pd.DataFrame(columns=cols)
+    starts = pd.to_datetime([b.start for b in buckets]).values
+    ends = pd.to_datetime([b.end for b in buckets]).values
+    labels = np.array([b.label for b in buckets], dtype=object)
+
+    dates = df["date"].values
+    idx = np.searchsorted(starts, dates, side="right") - 1
+    safe = idx.clip(0)
+    valid = (idx >= 0) & (dates <= ends[safe])
+
+    out = df.loc[valid].copy()
+    out["bucket_idx"] = idx[valid]
+    out["period"] = labels[idx[valid]]
+    out["period_start"] = starts[idx[valid]]
+    return out
+
+
+def add_ratios(t: pd.DataFrame) -> pd.DataFrame:
+    t["aov"] = (t["sales_net"] / t["checks"]).where(t["checks"] > 0)
+    t["cogs_pct"] = (t["cogs"] / t["sales_net"]).where(t["sales_net"] > 0)
+    return t
+
+
+def aggregate(df: pd.DataFrame, buckets: Sequence, by: Sequence[str] = (), fill_empty: bool = True) -> pd.DataFrame:
+    """Sum the records per bucket (and optional dimensions such as channel / payment_label).
+
+    With no extra dimensions and fill_empty=True every bucket is returned, even with zero
+    sales, so tables and charts show gaps instead of silently skipping periods.
+    """
+    by = list(by)
+    keys = ["bucket_idx", *by]
+    tagged = assign_buckets(df, buckets)
+    if tagged.empty:
+        g = pd.DataFrame(columns=keys + NUMERIC)
+    else:
+        g = tagged.groupby(keys, as_index=False)[NUMERIC].sum()
+
+    if fill_empty and not by:
+        g = (pd.DataFrame({"bucket_idx": range(len(buckets))})
+             .merge(g, on="bucket_idx", how="left").fillna({c: 0.0 for c in NUMERIC}))
+
+    g["bucket_idx"] = g["bucket_idx"].astype(int)
+    g["period"] = [buckets[i].label for i in g["bucket_idx"]]
+    g["period_start"] = pd.to_datetime([buckets[i].start for i in g["bucket_idx"]])
+    g["period_end"] = pd.to_datetime([buckets[i].end for i in g["bucket_idx"]])
+    for c in NUMERIC:
+        g[c] = pd.to_numeric(g[c], errors="coerce").fillna(0.0)
+    return add_ratios(g).sort_values(keys).reset_index(drop=True)
