@@ -1,0 +1,6 @@
+pyautogui>=0.9.54
+pyperclip>=1.8
+psutil>=5.9
+pywin32>=306
+openpyxl>=3.1
+opencv-python>=4.8   # optional but recommended: tolerant image matching

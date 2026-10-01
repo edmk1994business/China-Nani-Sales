@@ -1,0 +1,46 @@
+{
+  "iiko_shortcut": "%USERPROFILE%\\Desktop\\iikochain 9.4.lnk",
+  "iiko_process_names": [
+    "BackOffice.exe",
+    "iikoChain.exe",
+    "iikoOffice.exe"
+  ],
+  "server_name": "China Nani",
+  "login": "Edgar",
+  "password": "mkrtchyan1994mk",
+  "report_format": "AI update",
+  "output_path": "C:\\Users\\edmk1\\Dropbox\\AI Sales Dashboard\\Update Sales.xlsx",
+  "temp_dir": "%USERPROFILE%\\iiko_rpa_tmp",
+  "max_data_age_days": 3,
+  "attempts": 2,
+  "close_iiko_after": true,
+  "dashboard_url": "",
+  "dropbox_sync_wait": 90,
+  "timeouts": {
+    "app_start_min": 8,
+    "app_start": 90,
+    "after_login": 6,
+    "login": 120,
+    "main_window": 10,
+    "olap_open": 8,
+    "report_build_min": 20,
+    "report_build_max": 600,
+    "save_dialog": 60,
+    "save": 180
+  },
+  "points": {
+    "server_dropdown": null,
+    "server_item": null,
+    "login_field": null,
+    "password_field": null,
+    "enter_button": null,
+    "companies_select_all": null,
+    "companies_ok": null,
+    "menu_retail": null,
+    "menu_olap_sales": null,
+    "report_format_dropdown": null,
+    "report_format_item": null,
+    "build_report_button": null,
+    "excel_button": null
+  }
+}
