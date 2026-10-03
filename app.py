@@ -6,7 +6,8 @@ Data: iiko OLAP exports on Dropbox
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+import time
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -43,74 +44,112 @@ with st.spinner("Loading sales data from Dropbox…"):
     df_all, load_msgs, fetched_at = get_data()
 
 # --------------------------------------------------------------------------- #
-# Navigation state (cards on the overview jump to a section)
+# Session state: section navigation + one shared date range
 # --------------------------------------------------------------------------- #
-if "section" not in st.session_state:
-    st.session_state["section"] = "General"
+today = periods.today_local()
+DATE_MIN = date(2020, 1, 1)
+ss = st.session_state
+
+if "section" not in ss:
+    ss["section"] = "General"
 
 
 def go_to(section: str) -> None:
-    st.session_state["section"] = section
+    """Channel card / back button: switch section and scroll the new page to the very top."""
+    ss["section"] = section
+    ss["_scroll_top"] = True
 
 
+def _set_dates(start: date, end: date, preset: str) -> None:
+    """Single source of truth for the date range; keeps header + sidebar widgets in sync."""
+    ss["d_start"], ss["d_end"], ss["d_preset"] = start, end, preset
+    for prefix in ("hdr", "sb"):
+        ss[f"{prefix}_start"], ss[f"{prefix}_end"] = start, end
+    ss["pill_hdr_preset"] = preset if preset in periods.HEADER_PRESETS else None
+    ss["pill_sb_preset"] = preset if preset in periods.PRESETS else None
+
+
+def on_preset(key: str) -> None:
+    name = ss.get(key)
+    if name:
+        w = periods.resolve(name, today)
+        _set_dates(w.start, w.end, name)
+
+
+def on_dates(prefix: str) -> None:
+    s, e = ss.get(f"{prefix}_start"), ss.get(f"{prefix}_end")
+    if s is None or e is None:
+        return
+    if s > e:
+        s, e = e, s
+    _set_dates(s, e, periods.CUSTOM)
+
+
+if "d_start" not in ss:
+    _w = periods.resolve("Yesterday", today)
+    _set_dates(_w.start, _w.end, "Yesterday")
+
+DATE_KW = dict(min_value=DATE_MIN, max_value=today, format="DD.MM.YYYY")
+
 # --------------------------------------------------------------------------- #
-# Sidebar filters
+# Sidebar: numbered filter sections
 # --------------------------------------------------------------------------- #
-today = periods.today_local()
 with st.sidebar:
-    st.markdown('<div class="sb-title">Brand</div>', unsafe_allow_html=True)
-    brand = st.radio("Brand", config.BRANDS, index=0, label_visibility="collapsed")
+    with st.container(key="sbsec_1"):
+        ui.sidebar_title(1, "Select Brand")
+        brand = st.radio("Brand", config.BRANDS, key="pill_brand", label_visibility="collapsed")
 
-    st.markdown('<div class="sb-title">Period</div>', unsafe_allow_html=True)
-    preset = st.selectbox("Period", periods.PRESETS, index=1, label_visibility="collapsed")
-    custom = None
-    if preset == "Custom Range":
-        min_d = df_all["date"].min().date() if not df_all.empty else today.replace(month=1, day=1)
-        default_start = today.replace(day=1) if today.day > 1 else min_d
-        rng = st.date_input("Custom range", value=(default_start, today), min_value=min_d,
-                            max_value=today, format="DD.MM.YYYY")
-        if isinstance(rng, (tuple, list)) and len(rng) == 2:
-            custom = (rng[0], rng[1])
-        elif isinstance(rng, (tuple, list)) and len(rng) == 1:
-            custom = (rng[0], rng[0])
+    with st.container(key="sbsec_2"):
+        ui.sidebar_title(2, "Aggregation Level")
+        level = st.radio("Aggregation level", periods.LEVELS, key="pill_level", horizontal=True,
+                         label_visibility="collapsed")
+        st.markdown('<div class="sb-foot">Weekly / Monthly extend the dates to whole calendar weeks / months.</div>',
+                    unsafe_allow_html=True)
 
-    st.markdown('<div class="sb-title">Aggregation level</div>', unsafe_allow_html=True)
-    level = st.radio("Aggregation level", periods.LEVELS, index=0, horizontal=True,
-                     label_visibility="collapsed",
-                     help="Weekly and Monthly extend the selected dates to whole calendar weeks / months.")
+    with st.container(key="sbsec_3"):
+        ui.sidebar_title(3, "Quick Presets")
+        st.radio("Quick presets", periods.PRESETS, key="pill_sb_preset", horizontal=True,
+                 label_visibility="collapsed", on_change=on_preset, args=("pill_sb_preset",))
 
-    include_today = st.toggle(
-        "Include today (partial day)", value=False,
-        help="The 11:30 export only holds this morning's sales. Excluding today keeps period-to-date "
-             "comparisons fair. 'Today' preset always includes it.")
+    with st.container(key="sbsec_4"):
+        ui.sidebar_title(4, "Custom Date Range")
+        st.date_input("Start date", key="sb_start", on_change=on_dates, args=("sb",), **DATE_KW)
+        st.date_input("End date", key="sb_end", on_change=on_dates, args=("sb",), **DATE_KW)
+        include_today = st.toggle(
+            "Include today (partial day)", value=False,
+            help="The 11:30 export only holds this morning's sales. Excluding today keeps period-to-date "
+                 "comparisons fair. The 'Today' preset always includes it.")
 
-    st.markdown('<div class="sb-title">Comparison</div>', unsafe_allow_html=True)
-    compare_on = st.toggle("Compare with prior period", value=True)
-    basis = periods.COMPARE_BASES[0]
-    if compare_on:
-        basis = st.radio("Compare against", periods.COMPARE_BASES, index=0, label_visibility="collapsed")
+    with st.container(key="sbsec_5"):
+        ui.sidebar_title(5, "Comparison")
+        compare_on = st.toggle("Compare with prior period", value=True)
+        basis = periods.COMPARE_BASES[0]
+        if compare_on:
+            basis = st.radio("Compare against", periods.COMPARE_BASES, key="pill_basis",
+                             label_visibility="collapsed")
 
-    st.divider()
     if st.button("↻  Refresh data", width="stretch"):
         data.clear_cache()
         get_data.clear()
         st.rerun()
-    st.caption(f"Live file is updated daily at 11:30 by the iiko bot. Cache: {config.CACHE_TTL_SECONDS // 60} min.")
 
 theme = config.THEMES[brand]
 ui.inject_css(theme, brand)
 
-for m in load_msgs:
-    st.warning(m)
 if df_all.empty:
+    for m in load_msgs:
+        st.warning(m)
     st.error("No data could be loaded. Check the Dropbox links in `.streamlit/secrets.toml`.")
     st.stop()
 
 # --------------------------------------------------------------------------- #
 # Windows & buckets
 # --------------------------------------------------------------------------- #
+preset = ss["d_preset"]
+custom = (ss["d_start"], ss["d_end"])
+
 df_brand = df_all if brand == "All brands" else df_all[df_all["brand"] == brand]
-latest = df_brand["date"].max().date() if not df_brand.empty else None
+first_day, latest = data.date_bounds(df_brand)
 data_through = latest.strftime("%d %b %Y") if latest else "—"
 
 # Today's rows are only a partial day (export runs at 11:30) → leave them out unless asked for.
@@ -120,22 +159,22 @@ df_brand = df_brand[df_brand["date"] <= pd.Timestamp(cutoff)]
 data_end = min(latest, cutoff) if latest else None
 
 selected_w = periods.resolve(preset, today, custom)
-if selected_w.start <= cutoff < selected_w.end:          # period-to-date presets stop at the cutoff
+if selected_w.start <= cutoff < selected_w.end:          # period-to-date ranges stop at the cutoff
     selected_w = periods.Window(selected_w.start, cutoff, periods.fmt_range(selected_w.start, cutoff))
 cur_w = periods.pad(selected_w, level)
 cur_eff_end = periods.effective_end(cur_w, data_end)
 prev_w = periods.comparison(preset, cur_w, basis, level, data_end) if compare_on else None
 
+page_msgs: list[tuple[str, str]] = [("warning", m) for m in load_msgs]
 cur_df = metrics.window_slice(df_brand, cur_w)
 prev_df = metrics.window_slice(df_brand, prev_w) if prev_w else None
 if prev_df is not None and prev_df.empty:
-    st.info(f"No data available for the comparison period ({prev_w.label}). Deltas are hidden.")
+    page_msgs.append(("info", f"No data available for the comparison period ({prev_w.label}). Deltas are hidden."))
     prev_w, prev_df = None, None
 
-data_start = df_brand["date"].min().date() if not df_brand.empty else None
-if prev_w and data_start and (data_start - prev_w.start).days > 3:   # small gap = closed days (e.g. 1 Jan)
-    st.warning(f"The comparison period ({prev_w.label}) starts before the first day in the files "
-               f"({data_start:%d %b %Y}), so deltas only cover part of it.")
+if prev_w and first_day and (first_day - prev_w.start).days > 3:   # small gap = closed days (e.g. 1 Jan)
+    page_msgs.append(("warning", f"The comparison period ({prev_w.label}) starts before the first day in the "
+                                 f"files ({first_day:%d %b %Y}), so deltas only cover part of it."))
 
 cur_buckets = periods.buckets(cur_w.start, cur_eff_end, level)
 prev_buckets = periods.buckets(prev_w.start, prev_w.end, level) if prev_w else []
@@ -152,8 +191,29 @@ if level != "Daily":
 if excluded_today and cur_w.start <= today <= cur_w.end:
     notes.append("Today's partial data excluded")
 
-period_label = cur_w.label if preset == "Custom Range" else f"{preset} · {cur_w.label}"
-ui.hero(brand, theme, period_label, prev_w.label if prev_w else None, data_through, fetched_at, notes)
+with st.sidebar:
+    st.markdown(f'<div class="sb-foot">Data through <b>{data_through}</b> · loaded {fetched_at}.<br>'
+                f'The live file is updated daily at 11:30 by the iiko bot.</div>', unsafe_allow_html=True)
+
+# --------------------------------------------------------------------------- #
+# Header card: title, Start / End date pickers, quick presets
+# --------------------------------------------------------------------------- #
+period_label = cur_w.label if preset == periods.CUSTOM else f"{preset} · {cur_w.label}"
+with st.container(key="hdr"):
+    ui.hero_title(brand, theme, period_label, prev_w.label if prev_w else None, notes)
+    with st.container(key="hdr_row"):
+        c1, c2, c3 = st.columns([1, 1, 2.6], vertical_alignment="bottom")
+        with c1:
+            st.date_input("Start date", key="hdr_start", on_change=on_dates, args=("hdr",), **DATE_KW)
+        with c2:
+            st.date_input("End date", key="hdr_end", on_change=on_dates, args=("hdr",), **DATE_KW)
+        with c3:
+            st.markdown('<div class="hdr-label">Quick presets</div>', unsafe_allow_html=True)
+            st.radio("Quick presets", periods.HEADER_PRESETS, key="pill_hdr_preset", horizontal=True,
+                     label_visibility="collapsed", on_change=on_preset, args=("pill_hdr_preset",))
+
+for kind, msg in page_msgs:
+    (st.warning if kind == "warning" else st.info)(msg)
 
 # --------------------------------------------------------------------------- #
 # Shared helpers
@@ -239,7 +299,7 @@ def render_general() -> None:
     with c1:
         ui.block_title("Revenue share by channel")
         choice = st.radio("Measure", ["Net sales", "Gross sales", "Checks"], horizontal=True,
-                          key="donut_measure", label_visibility="collapsed")
+                          key="pill_donut", label_visibility="collapsed")
         mkey, mlabel = {"Net sales": ("sales_net", "sales after discount"),
                         "Gross sales": ("sales_gross", "sales before discount"),
                         "Checks": ("checks", "checks")}[choice]
@@ -309,7 +369,8 @@ def render_channel(channel: str) -> None:
 
 
 with st.container(key="nav"):
-    section = st.radio("Section", ui.SECTIONS, horizontal=True, key="section", label_visibility="collapsed")
+    section = st.radio("Section", ui.SECTIONS, horizontal=True, key="section", label_visibility="collapsed",
+                       on_change=lambda: ss.__setitem__("_scroll_top", True))
 
 if section == "General":
     render_general()
@@ -322,3 +383,8 @@ st.caption(
     "Checks are iiko order counts per payment type (an order split across two payment types counts in both). "
     f"Comparison basis: {basis.lower() if compare_on else 'off'}."
 )
+
+# client-side helpers (zero-height): KPI hover/tap animation, scroll-to-top after navigation
+ui.enable_kpi_pulse()
+if ss.pop("_scroll_top", False):
+    ui.scroll_to_top(nonce=str(time.time()))
