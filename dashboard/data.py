@@ -228,3 +228,10 @@ def aggregate(df: pd.DataFrame, buckets: Sequence, by: Sequence[str] = (), fill_
     for c in NUMERIC:
         g[c] = pd.to_numeric(g[c], errors="coerce").fillna(0.0)
     return add_ratios(g).sort_values(keys).reset_index(drop=True)
+
+
+def date_bounds(df: pd.DataFrame):
+    """(first day, last day) present in the data, as datetime.date, or (None, None)."""
+    if df.empty:
+        return None, None
+    return df["date"].min().date(), df["date"].max().date()
