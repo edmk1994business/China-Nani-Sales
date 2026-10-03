@@ -9,8 +9,10 @@ from dateutil.relativedelta import relativedelta
 
 from . import config
 
-PRESETS = ["Today", "Yesterday", "This Week", "Last Week", "This Month",
-           "Last Month", "This Year", "Last Year", "Custom Range"]
+PRESETS = ["Today", "Yesterday", "Last 7 Days", "Last 30 Days", "This Week", "Last Week",
+           "This Month", "Last Month", "This Year", "Last Year"]
+HEADER_PRESETS = ["Yesterday", "Last 7 Days", "Last 30 Days", "This Month", "Last Month"]
+CUSTOM = "Custom Range"
 LEVELS = ["Daily", "Weekly", "Monthly"]
 COMPARE_BASES = ["Prior period", "Same period last year"]
 
@@ -44,8 +46,11 @@ def today_local() -> date:
 
 
 def fmt_range(a: date, b: date) -> str:
+    """'30 Sep 2026', '01 – 07 Sep 2026', '28 Sep – 04 Oct 2026', '29 Dec 2025 – 04 Jan 2026'."""
     if a == b:
-        return a.strftime("%a %d %b %Y")
+        return a.strftime("%d %b %Y")
+    if (a.year, a.month) == (b.year, b.month):
+        return f"{a:%d} – {b:%d %b %Y}"
     if a.year == b.year:
         return f"{a.strftime('%d %b')} – {b.strftime('%d %b %Y')}"
     return f"{a.strftime('%d %b %Y')} – {b.strftime('%d %b %Y')}"
@@ -73,6 +78,9 @@ def resolve(preset: str, today: date, custom: tuple[date, date] | None = None) -
         s = e = t
     elif preset == "Yesterday":
         s = e = t - timedelta(days=1)
+    elif preset in ("Last 7 Days", "Last 30 Days"):          # complete days, ending yesterday
+        e = t - timedelta(days=1)
+        s = e - timedelta(days=(6 if preset == "Last 7 Days" else 29))
     elif preset == "This Week":
         s, e = week_start(t), t
     elif preset == "Last Week":
@@ -189,8 +197,7 @@ def buckets(start: date, end: date, level: str) -> list[Bucket]:
 
 def bucket_label(s: date, e: date, level: str, full: bool = True) -> str:
     if level == "Weekly":
-        wk = s.isocalendar()[1]
-        return f"W{wk:02d} · {s:%d %b}–{e:%d %b} {e:%y}"
+        return fmt_range(s, e)                       # clean date range, no week tag
     if level == "Monthly":
         return f"{s:%b %Y}" if full else f"{s:%b %Y} (to {e:%d %b})"
-    return s.strftime("%a %d %b %Y")
+    return s.strftime("%d %b %Y")
